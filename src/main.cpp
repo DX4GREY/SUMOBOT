@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <SparkFun_TB6612.h>
+#include <Ps3Controller.h>
 
 // ----- Konfigurasi SoftAP -----
 const char* ssid = "RobotController";
@@ -376,9 +377,82 @@ void handleMotor() {
   }
 }
 
+// Callback Function
+void notify() {
+
+  // // Shoulder & Trigger button changes for RGB LED
+  // // Set RGB values based upon analog button values
+  // if (abs(Ps3.event.analog_changed.button.l1)) {
+  //   // Left Shoulder - Red
+  //   redPWM = int(Ps3.data.analog.button.l1);
+  // }
+
+  // if (abs(Ps3.event.analog_changed.button.l2)) {
+  //   // Left Trigger - Green
+  //   greenPWM = int(Ps3.data.analog.button.l2);
+  // }
+
+  // if (abs(Ps3.event.analog_changed.button.r2)) {
+  //   // Right Trigger - Blue
+  //   bluePWM = int(Ps3.data.analog.button.r2);
+  // }
+
+  // // Right Shoulder button turns on all LED segments full, for white
+  // if (abs(Ps3.event.analog_changed.button.r1)) {
+  //   // Right Shoulder - White
+  //   redPWM = 255;
+  //   greenPWM = 255;
+  //   bluePWM = 255;
+  // }
+
+  // // Write LED values to RGB LED
+  // ledcWrite(redChannel, redPWM);
+  // ledcWrite(greenChannel, greenPWM);
+  // ledcWrite(blueChannel, bluePWM);
+
+  // // Print to Serial Monitor
+  // Serial.print("R = ");
+  // Serial.print(redPWM);
+  // Serial.print(" - G = ");
+  // Serial.print(greenPWM);
+  // Serial.print(" - B = ");
+  // Serial.println(bluePWM);
+  if (Ps3.event.button_down.up) {
+    maju(Ps3.event.button_down.r1 ? 200 : 255);
+  } else if (Ps3.event.button_down.down)
+  {
+    mundur(Ps3.event.button_down.r1 ? 200 : 255);
+  } else if (Ps3.event.button_down.left)
+  {
+    belokKiri(Ps3.event.button_down.r1 ? 200 : 255);
+  } else if (Ps3.event.button_down.right)
+  {
+    belokKanan(Ps3.event.button_down.r1 ? 200 : 255);
+  }
+  
+  
+  
+
+  delay(10);
+}
+
+// On Connection function
+void onConnect() {
+  // Print to Serial Monitor
+  Serial.println("Connected.");
+}
+
 // ================= SETUP =================
 void setup() {
   Serial.begin(115200);
+
+  // Define Callback Function
+  Ps3.attach(notify);
+  // Define On Connection Function
+  Ps3.attachOnConnect(onConnect);
+  // Emulate console as specific MAC address (change as required)
+  Ps3.begin("38:4F:F0:93:61:38");
+
   while (!Serial);  // tunggu serial siap (khusus board native USB, opsional)
   delay(500);
   
