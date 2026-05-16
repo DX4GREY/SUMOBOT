@@ -112,7 +112,7 @@ void notify() {
 // On Connection function
 void onConnect() {
   // Print to Serial Monitor
-  Serial.println("[PS3] Connected.");
+  Serial.println("[INIT] Ps3 Connected.");
 }
 
 // ================= SETUP =================
