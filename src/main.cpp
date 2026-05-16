@@ -417,22 +417,15 @@ void notify() {
   // Serial.print(greenPWM);
   // Serial.print(" - B = ");
   // Serial.println(bluePWM);
-  if (Ps3.event.button_down.up) {
+  if (Ps3.event.button_down.up){
     maju(Ps3.event.button_down.r1 ? 200 : 255);
-  } else if (Ps3.event.button_down.down)
-  {
+  } else if (Ps3.event.button_down.down){
     mundur(Ps3.event.button_down.r1 ? 200 : 255);
-  } else if (Ps3.event.button_down.left)
-  {
+  } else if (Ps3.event.button_down.left){
     belokKiri(Ps3.event.button_down.r1 ? 200 : 255);
-  } else if (Ps3.event.button_down.right)
-  {
+  } else if (Ps3.event.button_down.right){
     belokKanan(Ps3.event.button_down.r1 ? 200 : 255);
   }
-  
-  
-  
-
   delay(10);
 }
 
