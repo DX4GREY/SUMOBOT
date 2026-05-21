@@ -60,6 +60,8 @@ void checkHardware() {
   // Baca pin PWM (setelah di-set ke 0 atau berhenti)
   Serial.println("Motor driver power should be connected to VM (motor voltage) and VCC (logic voltage 5V/3.3V)");
   Serial.println("-> Pastikan GND motor dan GND ESP32 tersambung (common ground)!");
+  // Cek koneksi PS3 Controller
+  Serial.printf("PS3 Controller Connected: %s\n", Ps3.isConnected() ? "YES" : "NO");
   Serial.println("==========================\n");
 }
 
