@@ -1,4 +1,4 @@
-#include <Ps3Controller.h>
+#include <PS4Controller.h>
 #include <SparkFun_TB6612.h>
 
 // ================= PIN CONFIG =================
@@ -72,22 +72,22 @@ void setup() {
   // Stop motor awal
   berhenti();
 
-  // PS3 Init
-  Ps3.attachOnConnect(onConnect);
+  // PS4 Init
+  PS4.attachOnConnect(onConnect);
 
   /*
-    Ganti MAC ini sesuai MAC ESP32 yang ingin dipair ke PS3
+    Ganti MAC ini sesuai MAC ESP32 yang ingin dipair ke PS4
   */
-  Ps3.begin("12:34:56:78:9A:BC");
+  PS4.begin("12:34:56:78:9A:BC");
 
-  Serial.println("[INIT] Waiting PS3 connection...");
+  Serial.println("[INIT] Waiting PS4 connection...");
 }
 
 // ================= MAIN CONTROL =================
-void handlePs3() {
+void handlePs4() {
 
   // Fail-safe
-  if (!Ps3.isConnected()) {
+  if (!PS4.isConnected()) {
     berhenti();
     return;
   }
@@ -96,13 +96,13 @@ void handlePs3() {
   lastPacket = millis();
 
   // Turbo Mode
-  turboMode = Ps3.data.button.r1;
+  turboMode = PS4.data.button.r1;
 
   int speedLimit = turboMode ? MAX_SPEED : NORMAL_SPEED;
 
   // Analog Stick
-  int ly = Ps3.data.analog.stick.ly;
-  int lx = Ps3.data.analog.stick.lx;
+  int ly = PS4.data.analog.stick.ly;
+  int lx = PS4.data.analog.stick.lx;
 
   // Deadzone
   if (abs(ly) < DEADZONE)
@@ -146,7 +146,7 @@ void handlePs3() {
 void loop() {
 
   // Handle controller
-  handlePs3();
+  handlePs4();
 
   // Heartbeat LED
   if (millis() - lastBlink > 500) {
