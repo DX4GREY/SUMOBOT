@@ -1,4 +1,5 @@
-#include <PS4Controller.h>
+#include <Arduino.h>
+#include <Bluepad32.h>
 #include <SparkFun_TB6612.h>
 
 // ================= PIN CONFIG =================
@@ -21,11 +22,14 @@ Motor motorKanan(BIN1, BIN2, PWMB, 1, STBY);
 const int DEADZONE = 15;
 const int MAX_SPEED = 255;
 const int NORMAL_SPEED = 180;
+const unsigned long CONTROLLER_TIMEOUT_MS = 250;
 
 bool turboMode = false;
+bool motorStopped = false;
 
 unsigned long lastBlink = 0;
-unsigned long lastPacket = 0;
+unsigned long lastControllerData = 0;
+ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
 // ================= MOTOR FUNCTIONS =================
 void setMotor(int kiri, int kanan) {
@@ -34,133 +38,186 @@ void setMotor(int kiri, int kanan) {
 
   motorKiri.drive(kiri);
   motorKanan.drive(kanan);
+  motorStopped = (kiri == 0 && kanan == 0);
 
-  Serial.printf(
-    "[MOTOR] LEFT=%d RIGHT=%d\n",
-    kiri,
-    kanan
-  );
+  Serial.printf("[MOTOR] LEFT=%d RIGHT=%d\n", kiri, kanan);
 }
 
 void berhenti() {
+  if (motorStopped) return;
+
   motorKiri.drive(0);
   motorKanan.drive(0);
+  motorStopped = true;
 
   Serial.println("[MOTOR] STOP");
 }
 
-// ================= PS3 CONNECT =================
-void onConnect() {
-  Serial.println("\n[PS3] Controller Connected!");
-  digitalWrite(LED_PIN, HIGH);
-}
-
-// ================= SETUP =================
-void setup() {
-  Serial.begin(115200);
-
-  Serial.println("\n===== ESP32 RC ROBOT =====");
-
-  // LED
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-
-  // Driver Enable
-  pinMode(STBY, OUTPUT);
-  digitalWrite(STBY, HIGH);
-
-  // Stop motor awal
-  berhenti();
-
-  // PS4 Init
-  PS4.attachOnConnect(onConnect);
-
-  /*
-    Ganti MAC ini sesuai MAC ESP32 yang ingin dipair ke PS4
-  */
-  PS4.begin("12:34:56:78:9A:BC");
-
-  Serial.println("[INIT] Waiting PS4 connection...");
-}
-
-// ================= MAIN CONTROL =================
-void handlePs4() {
-
-  // Fail-safe
-  if (!PS4.isConnected()) {
-    berhenti();
-    return;
+bool hasConnectedController() {
+  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+    if (myControllers[i] && myControllers[i]->isConnected()) {
+      return true;
+    }
   }
 
-  // Update packet timer
-  lastPacket = millis();
+  return false;
+}
 
-  // Turbo Mode
-  turboMode = PS4.data.button.r1;
+// ================= BLUEPAD32 CALLBACKS =================
+// Dipanggil otomatis saat Controller terhubung
+void onConnectedController(ControllerPtr ctl) {
+  bool foundEmptySlot = false;
+  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+    if (myControllers[i] == nullptr) {
+      myControllers[i] = ctl;
+      foundEmptySlot = true;
+      Serial.printf("[BP32] Controller connected at slot [%d]\n", i);
+      ControllerProperties properties = ctl->getProperties();
+      Serial.printf("[BP32] Model=%s VID=0x%04x PID=0x%04x\n",
+                    ctl->getModelName().c_str(),
+                    properties.vendor_id,
+                    properties.product_id);
+      digitalWrite(LED_PIN, HIGH);
+      break;
+    }
+  }
+  if (!foundEmptySlot) {
+    Serial.println("[BP32] Warning: Max controllers reached, cannot connect this one.");
+  }
+}
 
+// Dipanggil otomatis saat Controller terputus
+void onDisconnectedController(ControllerPtr ctl) {
+  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+    if (myControllers[i] == ctl) {
+      myControllers[i] = nullptr;
+      Serial.printf("[BP32] Controller disconnected from slot [%d]\n", i);
+      digitalWrite(LED_PIN, LOW);
+      berhenti();
+      break;
+    }
+  }
+}
+
+// ================= PROCESSING GAMEPAD DATA =================
+void processGamepad(ControllerPtr ctl) {
+  // Turbo Mode pakai tombol R1 (di BP32 namanya: buttons() & BUTTON_SHOULDER_R)
+  turboMode = (ctl->buttons() & BUTTON_SHOULDER_R);
   int speedLimit = turboMode ? MAX_SPEED : NORMAL_SPEED;
 
-  // Analog Stick
-  int ly = PS4.data.analog.stick.ly;
-  int lx = PS4.data.analog.stick.lx;
+  // Bluepad32 membaca stick dari -511 sampai 512.
+  // axisY() bernilai negatif saat stick ke atas, axisX() positif saat ke kanan.
+  int ly = ctl->axisY();
+  int lx = ctl->axisX();
 
-  // Deadzone
-  if (abs(ly) < DEADZONE)
-    ly = 0;
+  // Matikan jika di dalam Deadzone (-15 sampai 15)
+  if (abs(ly) < DEADZONE) ly = 0;
+  if (abs(lx) < DEADZONE) lx = 0;
 
-  if (abs(lx) < DEADZONE)
-    lx = 0;
-
-  // Mapping
-  int throttle = map(ly, -128, 127, speedLimit, -speedLimit);
-  int steering = map(lx, -128, 127, -speedLimit, speedLimit);
+  // Mapping nilai stick menjadi target speed robot.
+  // ly dibalik (-ly) agar maju bernilai positif
+  int throttle = map(-ly, -512, 512, -speedLimit, speedLimit);
+  int steering = map(lx, -512, 512, -speedLimit, speedLimit);
 
   // Differential Steering
   int leftMotor = throttle + steering;
   int rightMotor = throttle - steering;
 
-  // Constraint
-  leftMotor = constrain(leftMotor, -255, 255);
-  rightMotor = constrain(rightMotor, -255, 255);
+  int highest = max(abs(leftMotor), abs(rightMotor));
+  if (highest > speedLimit) {
+    leftMotor = (leftMotor * speedLimit) / highest;
+    rightMotor = (rightMotor * speedLimit) / highest;
+  }
 
-  // Smooth curve
-  if (abs(leftMotor) < 10)
-    leftMotor = 0;
+  // Nilai potong jika terlalu kecil agar motor tidak berdengung
+  if (abs(leftMotor) < 10)  leftMotor = 0;
+  if (abs(rightMotor) < 10) rightMotor = 0;
 
-  if (abs(rightMotor) < 10)
-    rightMotor = 0;
-
-  // Apply Motor
+  // Jalankan Motor
   setMotor(leftMotor, rightMotor);
 
-  // Debug
-  Serial.printf(
-    "[PS3] LX=%d LY=%d | Turbo=%s\n",
-    lx,
-    ly,
-    turboMode ? "ON" : "OFF"
-  );
+  // Debug Data Stick
+  Serial.printf("[BP32] LX=%d LY=%d | Turbo=%s\n", lx, ly, turboMode ? "ON" : "OFF");
+}
+
+void processControllers() {
+  bool anyControllerActive = false;
+
+  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+    ControllerPtr myController = myControllers[i];
+
+    if (myController && myController->isConnected() && myController->hasData()) {
+      if (myController->isGamepad()) {
+        processGamepad(myController);
+        anyControllerActive = true;
+        lastControllerData = millis();
+        break; // Kita pakai controller pertama yang aktif saja
+      }
+
+      Serial.println("[BP32] Unsupported controller");
+    }
+  }
+
+  if (!anyControllerActive && !hasConnectedController()) {
+    berhenti();
+  }
+}
+
+// ================= SETUP =================
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\n===== ESP32 RC ROBOT (BLUEPAD32) =====");
+
+  // Setup I/O Pin
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+  pinMode(STBY, OUTPUT);
+  digitalWrite(STBY, HIGH);
+
+  berhenti();
+
+  // Setup Bluepad32
+  String fv = BP32.firmwareVersion();
+  Serial.printf("[INIT] Bluepad32 Firmware: %s\n", fv.c_str());
+  const uint8_t* addr = BP32.localBdAddress();
+  Serial.printf("[INIT] BD Addr: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+
+  // Daftarkan fungsi callback
+  BP32.setup(&onConnectedController, &onDisconnectedController);
+  BP32.enableVirtualDevice(false);
+  
+  // Lupakan device lama (opsional, bawaan Bluepad32 untuk reset pairing)
+  BP32.forgetBluetoothKeys(); 
+
+  Serial.println("[INIT] Waiting for controller... (Press SHARE + PS until blinking fast)");
 }
 
 // ================= LOOP =================
 void loop() {
+  // WAJIB dipanggil di awal loop agar Bluepad32 memproses data Bluetooth
+  bool hasLatestData = BP32.update();
 
-  // Handle controller
-  handlePs4();
-
-  // Heartbeat LED
-  if (millis() - lastBlink > 500) {
-    lastBlink = millis();
-
-    digitalWrite(
-      LED_PIN,
-      !digitalRead(LED_PIN)
-    );
+  if (hasLatestData) {
+    processControllers();
   }
 
-  // Emergency timeout
-  if (millis() - lastPacket > 1000) {
+  if (hasConnectedController() && millis() - lastControllerData > CONTROLLER_TIMEOUT_MS) {
     berhenti();
+  }
+
+  // Heartbeat LED (Hanya berkedip lambat jika controller belum connect)
+  if (millis() - lastBlink > 500) {
+    lastBlink = millis();
+    
+    // Jika tidak ada controller terkoneksi, buat led berkedip
+    bool connected = hasConnectedController();
+    
+    if(!connected) {
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    } else {
+      digitalWrite(LED_PIN, HIGH); // Diam/Menyala penuh saat connect
+    }
   }
 
   delay(10);
