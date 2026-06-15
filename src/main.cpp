@@ -107,8 +107,8 @@ void processGamepad(ControllerPtr ctl) {
 
   // Bluepad32 membaca stick dari -511 sampai 512.
   // axisY() bernilai negatif saat stick ke atas, axisX() positif saat ke kanan.
-  int ly = ctl->axisY();
-  int lx = ctl->axisX();
+  int ly = -(ctl->axisY());
+  int lx = ctl->axisRX();
 
   // Matikan jika di dalam Deadzone (-15 sampai 15)
   if (abs(ly) < DEADZONE) ly = 0;
