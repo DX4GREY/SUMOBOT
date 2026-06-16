@@ -122,11 +122,12 @@ void processGamepad(ControllerPtr ctl) {
   // Turbo Mode pakai tombol R1 (di BP32 namanya: buttons() & BUTTON_SHOULDER_R)
   turboMode = (ctl->buttons() & BUTTON_SHOULDER_R);
   int speedLimit = turboMode ? MAX_SPEED : NORMAL_SPEED;
+  int deadAnalog = 40; // Nilai stick di bawah ini dianggap 0 untuk menghindari noise
 
   // Bluepad32 membaca stick dari -511 sampai 512.
   // axisY() bernilai negatif saat stick ke atas, axisX() positif saat ke kanan.
-  int ly = -(ctl->axisY());
-  int lx = ctl->axisRX();
+  int ly = -(ctl->axisY() == 0 ? 0 : ctl->axisY() > deadAnalog ? 512 : ctl->axisY() < -deadAnalog ? -512 : 0); // Invert Y untuk logika maju positif
+  int lx = ctl->axisRX() == 0 ? 0 : ctl->axisRX() > deadAnalog ? 512 : ctl->axisRX() < -deadAnalog ? -512 : 0; // Gunakan RX untuk steering horizontal
 
   // Matikan jika di dalam Deadzone (-15 sampai 15)
   if (abs(ly) < DEADZONE) ly = 0;
@@ -238,5 +239,5 @@ void loop() {
     }
   }
 
-  delay(10);
+  delay(1);
 }
