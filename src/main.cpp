@@ -40,19 +40,19 @@ void setMotor(int kiri, int kanan) {
   kiri = constrain(kiri, -255, 255);
   kanan = constrain(kanan, -255, 255);
 
-  static int currentKiri = 0;
-  static int currentKanan = 0;
+  static int currentKiri = kiri;
+  static int currentKanan = kanan;
 
-  bool isTurning = (kiri != kanan);
-  if (isTurning) {
-    // Saat belok, langsung set tanpa ramp agar lebih responsif
-    currentKiri = kiri;
-    currentKanan = kanan;
-  } else {
-    // Hanya gunakan ramp saat berjalan lurus
-    currentKiri = accelerate(currentKiri, kiri, 20); // Ramp dengan step 20%
-    currentKanan = accelerate(currentKanan, kanan, 20);
-  }
+  // bool isTurning = (kiri != kanan);
+  // if (isTurning) {
+  //   // Saat belok, langsung set tanpa ramp agar lebih responsif
+  //   currentKiri = kiri;
+  //   currentKanan = kanan;
+  // } else {
+  //   // Hanya gunakan ramp saat berjalan lurus
+  //   currentKiri = accelerate(currentKiri, kiri, 20); // Ramp dengan step 20%
+  //   currentKanan = accelerate(currentKanan, kanan, 20);
+  // }
 
   motorKiri.drive(currentKiri);
   motorKanan.drive(currentKanan);
