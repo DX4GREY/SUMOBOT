@@ -134,27 +134,52 @@ void processGamepad(ControllerPtr ctl) {
   if (abs(lx) < DEADZONE) lx = 0;
 
   // Mapping nilai stick menjadi target speed robot.
-  // ly dibalik (-ly) agar maju bernilai positif
   int throttle = map(-ly, -512, 512, -speedLimit, speedLimit);
   int steering = map(lx, -512, 512, -speedLimit, speedLimit);
 
-  // Differential Steering
-  int leftMotor = throttle + steering;
-  int rightMotor = throttle - steering;
+  int leftMotor;
+  int rightMotor;
 
-  int highest = max(abs(leftMotor), abs(rightMotor));
-  if (highest > speedLimit) {
-    leftMotor = (leftMotor * speedLimit) / highest;
-    rightMotor = (rightMotor * speedLimit) / highest;
+  // Jika hampir diam, boleh pivot turn
+  if (abs(throttle) < 20) {
+      leftMotor = steering;
+      rightMotor = -steering;
+  }
+  else {
+      float steer = (float)steering / speedLimit;
+
+      const float MIN_TURN_RATIO = 0.3f; // roda dalam minimal 30%
+
+      if (steer > 0) {
+          // Belok kanan
+          leftMotor = throttle;
+
+          float ratio =
+              1.0f - (steer * (1.0f - MIN_TURN_RATIO));
+
+          rightMotor = throttle * ratio;
+      }
+      else {
+          // Belok kiri
+          rightMotor = throttle;
+
+          float ratio =
+              1.0f + (steer * (1.0f - MIN_TURN_RATIO));
+
+          leftMotor = throttle * ratio;
+      }
   }
 
-  // Nilai potong jika terlalu kecil agar motor tidak berdengung
-  if (abs(leftMotor) < 10)  leftMotor = 0;
+  // Safety
+  leftMotor = constrain(leftMotor, -speedLimit, speedLimit);
+  rightMotor = constrain(rightMotor, -speedLimit, speedLimit);
+
+  // Nilai potong agar motor tidak berdengung
+  if (abs(leftMotor) < 10) leftMotor = 0;
   if (abs(rightMotor) < 10) rightMotor = 0;
 
   // Jalankan Motor
   setMotor(leftMotor, rightMotor);
-
   // Debug Data Stick
   Serial.printf("[BP32] LX=%d LY=%d | Turbo=%s\n", lx, ly, turboMode ? "ON" : "OFF");
 }
