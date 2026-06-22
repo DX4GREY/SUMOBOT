@@ -40,25 +40,11 @@ void setMotor(int kiri, int kanan) {
   kiri = constrain(kiri, -255, 255);
   kanan = constrain(kanan, -255, 255);
 
-  static int currentKiri = kiri;
-  static int currentKanan = kanan;
+  motorKiri.drive(kiri);
+  motorKanan.drive(kanan);
+  motorStopped = (kiri == 0 && kanan == 0);
 
-  // bool isTurning = (kiri != kanan);
-  // if (isTurning) {
-  //   // Saat belok, langsung set tanpa ramp agar lebih responsif
-  //   currentKiri = kiri;
-  //   currentKanan = kanan;
-  // } else {
-  //   // Hanya gunakan ramp saat berjalan lurus
-  //   currentKiri = accelerate(currentKiri, kiri, 20); // Ramp dengan step 20%
-  //   currentKanan = accelerate(currentKanan, kanan, 20);
-  // }
-
-  motorKiri.drive(currentKiri);
-  motorKanan.drive(currentKanan);
-  motorStopped = (currentKiri == 0 && currentKanan == 0);
-
-  Serial.printf("[MOTOR] LEFT=%d RIGHT=%d\n", currentKiri, currentKanan);
+  Serial.printf("[MOTOR] LEFT=%d RIGHT=%d\n", kiri, kanan);
 }
 
 void berhenti() {
@@ -126,7 +112,7 @@ void processGamepad(ControllerPtr ctl) {
 
   // Bluepad32 membaca stick dari -511 sampai 512.
   // axisY() bernilai negatif saat stick ke atas, axisX() positif saat ke kanan.
-  int ly = -(ctl->axisY() == 0 ? 0 : ctl->axisY() > deadAnalog ? 512 : ctl->axisY() < -deadAnalog ? -512 : 0); // Invert Y untuk logika maju positif
+  int ly = ctl->axisY() == 0 ? 0 : ctl->axisY() > deadAnalog ? 512 : ctl->axisY() < -deadAnalog ? -512 : 0;
   int lx = ctl->axisRX() == 0 ? 0 : ctl->axisRX() > deadAnalog ? 512 : ctl->axisRX() < -deadAnalog ? -512 : 0; // Gunakan RX untuk steering horizontal
 
   // Matikan jika di dalam Deadzone (-15 sampai 15)
@@ -135,7 +121,7 @@ void processGamepad(ControllerPtr ctl) {
 
   // Mapping nilai stick menjadi target speed robot.
   int throttle = map(-ly, -512, 512, -speedLimit, speedLimit);
-  int steering = map(lx, -512, 512, -speedLimit, speedLimit);
+  int steering = map(-lx, -512, 512, -speedLimit, speedLimit);
 
   int leftMotor;
   int rightMotor;
