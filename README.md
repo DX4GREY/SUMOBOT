@@ -1,261 +1,68 @@
-# SUMOBOT - TB6612FNG Motor Controller
+# SUMOBOT - ESP32 + ZK-BM1 10A
 
-A web-based robot motor control system using ESP32 and TB6612FNG dual motor driver. Control your robot via a responsive web interface with real-time speed adjustment and directional controls.
+Robot sumo dua motor yang dikendalikan radio FlySky melalui receiver FS-iA6B dan protokol i-BUS. Driver motor yang dipakai adalah ZK-BM1 dual-channel 10A.
 
-## Features
+## Hardware
 
-- **Web-based Control Interface**: Modern, responsive dashboard accessible from any device on the local network
-- **Dual Motor Control**: Independent control of left and right motors using SparkFun TB6612FNG driver
-- **Speed Adjustment**: Real-time PWM speed control (50-255) with visual feedback
-- **Directional Controls**: Forward, backward, left turn, right turn, and stop commands
-- **Debug Console**: Built-in hardware status checking and WiFi diagnostics
-- **WiFi Access Point**: Creates standalone WiFi network without requiring router connectivity
-- **Hardware Status Monitoring**: Periodic debug logs for motor and driver status
+- ESP32 development board
+- ZK-BM1 dual-channel DC motor driver, 10A per kanal
+- 2 motor DC
+- Transmitter FlySky FS-i6/kompatibel dan receiver FS-iA6B
+- Catu motor 3-18V yang sesuai dengan tegangan dan arus motor
 
-## Hardware Requirements
+## Wiring
 
-- **Microcontroller**: ESP32 Development Board
-- **Motor Driver**: SparkFun TB6612FNG (or compatible)
-- **Motors**: 2x DC Motors (compatible with TB6612FNG)
-- **Power**: Separate power supply for motors (VM) and logic (VCC 3.3V-5V)
-- **Connections**: Common ground between ESP32 and motor driver
+| ZK-BM1 | ESP32 / perangkat | Fungsi |
+| --- | --- | --- |
+| IN1 | GPIO 4 | Motor kiri maju (PWM) |
+| IN2 | GPIO 14 | Motor kiri mundur (PWM) |
+| IN3 | GPIO 18 | Motor kanan maju (PWM) |
+| IN4 | GPIO 19 | Motor kanan mundur (PWM) |
+| GND (signal) | GND ESP32 | Ground bersama |
+| OUT1, OUT2 | Motor kiri | Keluaran kanal A |
+| OUT3, OUT4 | Motor kanan | Keluaran kanal B |
+| VIN +, VIN - | Catu motor | Masukan daya motor |
+| FS-iA6B i-BUS `SERVO` signal | Level shifter/pembagi tegangan → GPIO 16 | Data receiver |
+| FS-iA6B VCC | 5V regulated | Daya receiver |
+| FS-iA6B GND | GND ESP32 | Ground bersama |
 
-## Pin Configuration
+ZK-BM1 tidak memakai pin `PWMA`, `PWMB`, atau `STBY` terpisah. Kecepatan dan arah dikendalikan langsung dengan PWM pada pasangan IN1/IN2 dan IN3/IN4.
 
-| Purpose | GPIO Pin | Notes |
-|---------|----------|-------|
-| Motor A Direction 1 | GPIO 4 (AIN1) | Motor A forward |
-| Motor A Direction 2 | GPIO 14 (AIN2) | Motor A backward |
-| Motor A Speed (PWM) | GPIO 5 (PWMA) | PWM frequency 5kHz |
-| Motor B Direction 1 | GPIO 18 (BIN1) | Motor B forward |
-| Motor B Direction 2 | GPIO 19 (BIN2) | Motor B backward |
-| Motor B Speed (PWM) | GPIO 21 (PWMB) | PWM frequency 5kHz |
-| Standby (Enable) | GPIO 33 (STBY) | Active HIGH to enable driver |
-| Status LED | GPIO 2 | Built-in LED indicator |
+> Jangan menyuplai ESP32 dari terminal VIN driver secara langsung. Satukan GND ESP32 dengan GND sinyal ZK-BM1. Modul tidak memiliki proteksi polaritas terbalik, jadi periksa VIN sebelum menyalakan daya.
 
-## Setup & Installation
+> Jangan sambungkan signal i-BUS 5V langsung ke GPIO16 ESP32. Gunakan level shifter 5V-ke-3,3V atau pembagi tegangan, misalnya 1 kΩ dari signal receiver ke GPIO16 dan 2 kΩ dari GPIO16 ke GND. Pastikan orientasi pin signal, VCC, dan GND pada port `SERVO` benar.
 
-### 1. Hardware Wiring
+## Kontrol motor
 
-Connect the TB6612FNG motor driver to your ESP32:
+| Gerakan kanal | IN maju | IN mundur |
+| --- | --- | --- |
+| Maju | PWM | LOW |
+| Mundur | LOW | PWM |
+| Berhenti bebas (coast) | LOW | LOW |
+| Rem elektrik | HIGH | HIGH |
 
-```
-TB6612FNG      →  ESP32
-─────────────────────────
-AIN1           →  GPIO 4
-AIN2           →  GPIO 14
-PWMA           →  GPIO 5
-BIN1           →  GPIO 18
-BIN2           →  GPIO 19
-PWMB           →  GPIO 21
-STBY           →  GPIO 33
-GND            →  GND (COMMON)
-VM             →  Motor Power Supply (+)
-GND (VM)       →  Motor Power Supply (-)
-VCC            →  3.3V or 5V (Logic voltage)
-```
+Firmware menggunakan mode coast saat berhenti, PWM 2 kHz dengan resolusi 8-bit, dan mematikan kanal sesaat sebelum membalik arah. Nilai kecepatan adalah 0-255.
 
-### 2. Software Setup
+## Remote FS-iA6B
 
-**Prerequisites:**
-- PlatformIO IDE installed (VS Code extension recommended)
-- Python 3.x
+- CH1: kemudi kiri/kanan
+- CH2: maju/mundur menggunakan stick yang kembali ke tengah
+- CH5: turbo jika nilainya di atas 1500 µs (batas 255; normal 180)
+- LED GPIO 2 berkedip saat menunggu dan menyala ketika data receiver diterima
+- Motor otomatis berhenti jika frame i-BUS tidak diterima selama 100 ms
 
-**Steps:**
+Hubungkan port i-BUS bertanda `SERVO` pada FS-iA6B, bukan port `SENS`, ke GPIO16 melalui penurun level. Firmware membaca frame pada 115200 baud dan memvalidasi checksum sebelum menggerakkan motor.
 
-1. Clone/open this repository in PlatformIO
+Bind receiver menggunakan bind plug sesuai petunjuk FS-iA6B. Pada transmitter, set endpoint CH1/CH2 sekitar 1000–2000 µs dan posisi netral sekitar 1500 µs. Jika stick yang dipilih tidak kembali ke tengah, aktifkan self-centering atau ubah `THROTTLE_CHANNEL` di firmware.
 
-2. Install dependencies:
-```bash
-pio lib install "mbed-ateyercheese/Sparkfun_TB6612@0.0.0+sha.9d2787060b3e"
-```
+## Build dan upload
 
-3. Build the project:
 ```bash
 pio run --environment esp32dev
-```
-
-4. Upload to ESP32:
-```bash
 pio run --target upload --environment esp32dev
-```
-
-5. Monitor serial output:
-```bash
 pio device monitor --baud 115200
 ```
 
-## Usage
+Jika arah salah, tukar kedua kabel motor pada kanal terkait. Untuk beban mendekati 10A, gunakan kabel yang sesuai dan pendinginan yang memadai.
 
-### Connecting to the Robot
-
-1. Power on the ESP32
-2. On your device, connect to WiFi network: **`RobotController`**
-3. WiFi Password: **`12345678`**
-4. Open browser and navigate to: **`http://192.168.4.1`**
-
-### Control Interface
-
-The web dashboard provides:
-
-- **▲ Forward Button**: Move robot forward (hold to continue)
-- **▼ Backward Button**: Move robot backward (hold to continue)
-- **◀ Left Turn Button**: Rotate robot left (hold to continue)
-- **▶ Right Turn Button**: Rotate robot right (hold to continue)
-- **■ Stop Button**: Emergency stop / brake
-- **Speed Slider**: Adjust motor speed from 50% to 100% (PWM 50-255)
-- **🔍 Debug Serial Button**: Display hardware and WiFi status
-
-### Motor Movement Logic
-
-| Command | Left Motor | Right Motor |
-|---------|-----------|-------------|
-| Forward | Forward | Forward |
-| Backward | Backward | Backward |
-| Left Turn | Backward | Forward |
-| Right Turn | Forward | Backward |
-| Stop | Brake | Brake |
-
-## API Endpoints
-
-The web server exposes the following endpoints:
-
-### GET /
-Returns the HTML control interface.
-
-### GET /motor?cmd=<COMMAND>&val=<VALUE>
-
-**Commands:**
-- `maju` - Move forward
-- `mundur` - Move backward
-- `kiri` - Turn left
-- `kanan` - Turn right
-- `stop` - Stop and brake
-- `speed&val=<50-255>` - Set motor speed
-- `debug` - Print debug information to serial
-
-**Examples:**
-```
-http://192.168.4.1/motor?cmd=maju
-http://192.168.4.1/motor?cmd=speed&val=200
-http://192.168.4.1/motor?cmd=stop
-http://192.168.4.1/motor?cmd=debug
-```
-
-## Troubleshooting
-
-### Robot not responding
-
-1. **Check Serial Connection**: Verify USB connection and correct COM port
-2. **Check WiFi**: Confirm device is connected to "RobotController" network
-3. **Check Power**: Ensure motor power supply is connected and turned on
-4. **Click Debug Button**: View hardware and WiFi status in serial monitor
-
-### Motors not moving
-
-1. **Verify Ground Connection**: Ensure common ground between ESP32 and motor driver
-2. **Check Voltage**: Motor power supply (VM) should match motor specifications
-3. **Check STBY Pin**: Serial monitor should show "STBY set HIGH"
-4. **Test with Serial Commands**: Use debug mode to verify PWM output
-
-### Erratic Motor Behavior
-
-1. **Motor Power Interference**: Add capacitors near motor power input
-2. **Poor Wiring**: Re-secure all connections, especially power lines
-3. **Conflicting Pin Usage**: Verify no pins are used elsewhere
-
-## Serial Debug Output
-
-Monitor the serial port at 115200 baud to see:
-
-```
-======== BOOTING ========
-ESP32 TB6612FNG Debug Mode
-[INIT] STBY set HIGH -> Driver enabled
-===== CHECK HARDWARE =====
-STBY Pin (33) State: HIGH
-AIN1: 4, AIN2: 14, PWMA: 5
-BIN1: 18, BIN2: 19, PWMB: 21
-...
-[WIFI] Access Point SSID: RobotController
-[WIFI] IP Address: 192.168.4.1
-[WIFI] Client count: 1
-[SERVER] Web server dimulai pada port 80
-```
-
-## Performance Specifications
-
-- **PWM Frequency**: 5 kHz
-- **Speed Range**: 50-255 (PWM values)
-- **Response Time**: <50ms for commands
-- **Concurrent Clients**: Up to ~10 simultaneous WiFi connections
-- **Baud Rate**: 115200 bps (serial debugging)
-
-## Project Structure
-
-```
-SUMOBOT/
-├── src/
-│   └── main.cpp              # Main program with motor control and web server
-├── include/                  # Header files (if needed)
-├── lib/                      # External libraries
-├── test/                     # Test files
-├── platformio.ini           # PlatformIO configuration
-└── README.md                # This file
-```
-
-## Dependencies
-
-- **SparkFun_TB6612**: Motor driver library
-- **WiFi.h**: Built-in WiFi functionality
-- **WebServer.h**: Built-in web server functionality
-- **Arduino.h**: Standard Arduino framework (via PlatformIO)
-
-## Configuration
-
-Edit the following in `src/main.cpp` to customize:
-
-```cpp
-// WiFi Settings
-const char* ssid = "RobotController";        // WiFi network name
-const char* password = "12345678";           // WiFi password
-
-// Default Speed
-int speedValue = 200;                        // Initial motor speed (50-255)
-
-// GPIO Pins
-#define AIN1 4                               // Motor A direction 1
-#define AIN2 14                              // Motor A direction 2
-#define PWMA 5                               // Motor A PWM
-#define BIN1 18                              // Motor B direction 1
-#define BIN2 19                              // Motor B direction 2
-#define PWMB 21                              // Motor B PWM
-#define STBY 33                              // Standby/Enable pin
-#define LED_PIN 2                            // Status LED
-```
-
-## Development Notes
-
-- Motor offset value is set to 1 for positive logic direction
-- Built-in LED (GPIO 2) blinks to indicate server operation
-- Periodic debug output every 10 seconds shows system status
-- All motor commands include serial logging for debugging
-- HTML/CSS is embedded directly in the firmware for minimal storage usage
-
-## License
-
-This project is part of the SUMOBOT robot platform.
-
-## Support
-
-For issues or questions:
-1. Check the serial monitor for debug output
-2. Verify hardware connections match pin configuration
-3. Ensure proper power supply for motors and logic circuits
-4. Review troubleshooting section above
-
----
-
-**Last Updated**: 2026-05-14  
-**Platform**: ESP32 (espressif32)  
-**Framework**: Arduino
+Referensi driver: [ZK-BM1 10A Motor Driver](https://docs.cirkitdesigner.com/component/86071865-61ac-4a34-bb10-e60bb542f0c1/zk-bm1-10a-motor-driver).

@@ -1,253 +1,219 @@
 #include <Arduino.h>
-#include <Bluepad32.h>
-#include <SparkFun_TB6612.h>
 
 // ================= PIN CONFIG =================
-#define AIN1 4
-#define AIN2 14
-#define PWMA 5
-
-#define BIN1 18
-#define BIN2 19
-#define PWMB 21
-
-#define STBY 33
+#define MOTOR_KIRI_IN1 4
+#define MOTOR_KIRI_IN2 14
+#define MOTOR_KANAN_IN3 18
+#define MOTOR_KANAN_IN4 19
+#define IBUS_RX_PIN 16
 #define LED_PIN 2
 
 // ================= MOTOR CONFIG =================
-Motor motorKiri(AIN1, AIN2, PWMA, 1, STBY);
-Motor motorKanan(BIN1, BIN2, PWMB, 1, STBY);
+const int PWM_FREQ = 2000;
+const int PWM_RESOLUTION = 8;
+const int PWM_KIRI_MAJU = 0;
+const int PWM_KIRI_MUNDUR = 1;
+const int PWM_KANAN_MAJU = 2;
+const int PWM_KANAN_MUNDUR = 3;
+
+// ================= RECEIVER CONFIG =================
+HardwareSerial IBusSerial(2);
+const int IBUS_FRAME_SIZE = 32;
+const int IBUS_CHANNEL_COUNT = 14;
+const int STEERING_CHANNEL = 0;  // FS-i6 CH1
+const int THROTTLE_CHANNEL = 1;  // FS-i6 CH2 (stick dengan pegas ke tengah)
+const int TURBO_CHANNEL = 4;     // FS-i6 CH5
+const int CHANNEL_MIN = 1000;
+const int CHANNEL_CENTER = 1500;
+const int CHANNEL_MAX = 2000;
+const int CHANNEL_DEADZONE = 35;
+const unsigned long RECEIVER_TIMEOUT_MS = 100;
 
 // ================= SETTINGS =================
-const int DEADZONE = 15;
 const int MAX_SPEED = 255;
 const int NORMAL_SPEED = 180;
-const unsigned long CONTROLLER_TIMEOUT_MS = 250;
+const float MIN_TURN_RATIO = 0.3f;
 
 bool turboMode = false;
 bool motorStopped = false;
-
+bool receiverConnected = false;
+int lastKiri = 0;
+int lastKanan = 0;
+uint16_t channels[IBUS_CHANNEL_COUNT] = {};
+uint8_t ibusFrame[IBUS_FRAME_SIZE];
+int ibusIndex = 0;
+unsigned long lastReceiverFrame = 0;
 unsigned long lastBlink = 0;
-unsigned long lastControllerData = 0;
-ControllerPtr myControllers[BP32_MAX_GAMEPADS];
-
-int accelerate(int v1, int v2, int t){
-  return v1 + ((v2 - v1) * t) / 100;
-}
+unsigned long lastDebug = 0;
 
 // ================= MOTOR FUNCTIONS =================
+void writeMotor(int majuChannel, int mundurChannel, int speed) {
+  if (speed > 0) {
+    ledcWrite(mundurChannel, 0);
+    ledcWrite(majuChannel, speed);
+  } else if (speed < 0) {
+    ledcWrite(majuChannel, 0);
+    ledcWrite(mundurChannel, -speed);
+  } else {
+    ledcWrite(majuChannel, 0);
+    ledcWrite(mundurChannel, 0);
+  }
+}
+
 void setMotor(int kiri, int kanan) {
   kiri = constrain(kiri, -255, 255);
   kanan = constrain(kanan, -255, 255);
 
-  motorKiri.drive(kiri);
-  motorKanan.drive(kanan);
-  motorStopped = (kiri == 0 && kanan == 0);
+  // Break-before-make saat arah berubah.
+  if ((kiri > 0 && lastKiri < 0) || (kiri < 0 && lastKiri > 0)) {
+    writeMotor(PWM_KIRI_MAJU, PWM_KIRI_MUNDUR, 0);
+    delayMicroseconds(200);
+  }
+  if ((kanan > 0 && lastKanan < 0) || (kanan < 0 && lastKanan > 0)) {
+    writeMotor(PWM_KANAN_MAJU, PWM_KANAN_MUNDUR, 0);
+    delayMicroseconds(200);
+  }
 
-  Serial.printf("[MOTOR] LEFT=%d RIGHT=%d\n", kiri, kanan);
+  writeMotor(PWM_KIRI_MAJU, PWM_KIRI_MUNDUR, kiri);
+  writeMotor(PWM_KANAN_MAJU, PWM_KANAN_MUNDUR, kanan);
+  lastKiri = kiri;
+  lastKanan = kanan;
+  motorStopped = (kiri == 0 && kanan == 0);
 }
 
 void berhenti() {
   if (motorStopped) return;
 
-  motorKiri.drive(0);
-  motorKanan.drive(0);
+  writeMotor(PWM_KIRI_MAJU, PWM_KIRI_MUNDUR, 0);
+  writeMotor(PWM_KANAN_MAJU, PWM_KANAN_MUNDUR, 0);
+  lastKiri = 0;
+  lastKanan = 0;
   motorStopped = true;
-
   Serial.println("[MOTOR] STOP");
 }
 
-bool hasConnectedController() {
-  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
-    if (myControllers[i] && myControllers[i]->isConnected()) {
-      return true;
+// ================= I-BUS RECEIVER =================
+bool decodeIBusFrame() {
+  if (ibusFrame[0] != 0x20 || ibusFrame[1] != 0x40) return false;
+
+  uint16_t checksum = 0xFFFF;
+  for (int i = 0; i < IBUS_FRAME_SIZE - 2; i++) checksum -= ibusFrame[i];
+
+  uint16_t receivedChecksum = ibusFrame[30] | (ibusFrame[31] << 8);
+  if (checksum != receivedChecksum) return false;
+
+  for (int i = 0; i < IBUS_CHANNEL_COUNT; i++) {
+    channels[i] = ibusFrame[2 + i * 2] | (ibusFrame[3 + i * 2] << 8);
+  }
+
+  lastReceiverFrame = millis();
+  receiverConnected = true;
+  return true;
+}
+
+bool readIBus() {
+  bool receivedFrame = false;
+
+  while (IBusSerial.available()) {
+    uint8_t value = IBusSerial.read();
+
+    // Setiap frame valid dimulai dengan panjang 0x20 dan perintah kanal 0x40.
+    if (ibusIndex == 0 && value != 0x20) continue;
+    if (ibusIndex == 1 && value != 0x40) {
+      ibusIndex = (value == 0x20) ? 1 : 0;
+      if (ibusIndex == 1) ibusFrame[0] = 0x20;
+      continue;
+    }
+
+    ibusFrame[ibusIndex++] = value;
+    if (ibusIndex == IBUS_FRAME_SIZE) {
+      receivedFrame |= decodeIBusFrame();
+      ibusIndex = 0;
     }
   }
 
-  return false;
+  return receivedFrame;
 }
 
-// ================= BLUEPAD32 CALLBACKS =================
-// Dipanggil otomatis saat Controller terhubung
-void onConnectedController(ControllerPtr ctl) {
-  bool foundEmptySlot = false;
-  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
-    if (myControllers[i] == nullptr) {
-      myControllers[i] = ctl;
-      foundEmptySlot = true;
-      Serial.printf("[BP32] Controller connected at slot [%d]\n", i);
-      ControllerProperties properties = ctl->getProperties();
-      Serial.printf("[BP32] Model=%s VID=0x%04x PID=0x%04x\n",
-                    ctl->getModelName().c_str(),
-                    properties.vendor_id,
-                    properties.product_id);
-      digitalWrite(LED_PIN, HIGH);
-      break;
-    }
+int channelToSpeed(uint16_t value, int speedLimit) {
+  int centered = constrain((int)value, CHANNEL_MIN, CHANNEL_MAX) - CHANNEL_CENTER;
+  if (abs(centered) <= CHANNEL_DEADZONE) return 0;
+
+  if (centered > 0) {
+    return map(centered, CHANNEL_DEADZONE, CHANNEL_MAX - CHANNEL_CENTER, 0, speedLimit);
   }
-  if (!foundEmptySlot) {
-    Serial.println("[BP32] Warning: Max controllers reached, cannot connect this one.");
-  }
+  return map(centered, CHANNEL_MIN - CHANNEL_CENTER, -CHANNEL_DEADZONE, -speedLimit, 0);
 }
 
-// Dipanggil otomatis saat Controller terputus
-void onDisconnectedController(ControllerPtr ctl) {
-  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
-    if (myControllers[i] == ctl) {
-      myControllers[i] = nullptr;
-      Serial.printf("[BP32] Controller disconnected from slot [%d]\n", i);
-      digitalWrite(LED_PIN, LOW);
-      berhenti();
-      break;
-    }
-  }
-}
-
-// ================= PROCESSING GAMEPAD DATA =================
-void processGamepad(ControllerPtr ctl) {
-  // Turbo Mode pakai tombol R1 (di BP32 namanya: buttons() & BUTTON_SHOULDER_R)
-  turboMode = (ctl->buttons() & BUTTON_SHOULDER_R);
+void processReceiver() {
+  turboMode = channels[TURBO_CHANNEL] > 1500;
   int speedLimit = turboMode ? MAX_SPEED : NORMAL_SPEED;
-  int deadAnalog = 40; // Nilai stick di bawah ini dianggap 0 untuk menghindari noise
-
-  // Bluepad32 membaca stick dari -511 sampai 512.
-  // axisY() bernilai negatif saat stick ke atas, axisX() positif saat ke kanan.
-  int ly = ctl->axisY() == 0 ? 0 : ctl->axisY() > deadAnalog ? 512 : ctl->axisY() < -deadAnalog ? -512 : 0;
-  int lx = ctl->axisRX() == 0 ? 0 : ctl->axisRX() > deadAnalog ? 512 : ctl->axisRX() < -deadAnalog ? -512 : 0; // Gunakan RX untuk steering horizontal
-
-  // Matikan jika di dalam Deadzone (-15 sampai 15)
-  if (abs(ly) < DEADZONE) ly = 0;
-  if (abs(lx) < DEADZONE) lx = 0;
-
-  // Mapping nilai stick menjadi target speed robot.
-  int throttle = map(-ly, -512, 512, -speedLimit, speedLimit);
-  int steering = map(-lx, -512, 512, -speedLimit, speedLimit);
+  int throttle = channelToSpeed(channels[THROTTLE_CHANNEL], speedLimit);
+  int steering = channelToSpeed(channels[STEERING_CHANNEL], speedLimit);
 
   int leftMotor;
   int rightMotor;
 
-  // Jika hampir diam, boleh pivot turn
   if (abs(throttle) < 20) {
-      leftMotor = steering;
-      rightMotor = -steering;
-  }
-  else {
-      float steer = (float)steering / speedLimit;
-
-      const float MIN_TURN_RATIO = 0.3f; // roda dalam minimal 30%
-
-      if (steer > 0) {
-          // Belok kanan
-          leftMotor = throttle;
-
-          float ratio =
-              1.0f - (steer * (1.0f - MIN_TURN_RATIO));
-
-          rightMotor = throttle * ratio;
-      }
-      else {
-          // Belok kiri
-          rightMotor = throttle;
-
-          float ratio =
-              1.0f + (steer * (1.0f - MIN_TURN_RATIO));
-
-          leftMotor = throttle * ratio;
-      }
-  }
-
-  // Safety
-  leftMotor = constrain(leftMotor, -speedLimit, speedLimit);
-  rightMotor = constrain(rightMotor, -speedLimit, speedLimit);
-
-  // Nilai potong agar motor tidak berdengung
-  if (abs(leftMotor) < 10) leftMotor = 0;
-  if (abs(rightMotor) < 10) rightMotor = 0;
-
-  // Jalankan Motor
-  setMotor(leftMotor, rightMotor);
-  // Debug Data Stick
-  Serial.printf("[BP32] LX=%d LY=%d | Turbo=%s\n", lx, ly, turboMode ? "ON" : "OFF");
-}
-
-void processControllers() {
-  bool anyControllerActive = false;
-
-  for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
-    ControllerPtr myController = myControllers[i];
-
-    if (myController && myController->isConnected() && myController->hasData()) {
-      if (myController->isGamepad()) {
-        processGamepad(myController);
-        anyControllerActive = true;
-        lastControllerData = millis();
-        break; // Kita pakai controller pertama yang aktif saja
-      }
-
-      Serial.println("[BP32] Unsupported controller");
+    leftMotor = steering;
+    rightMotor = -steering;
+  } else {
+    float steer = (float)steering / speedLimit;
+    if (steer > 0) {
+      leftMotor = throttle;
+      rightMotor = throttle * (1.0f - steer * (1.0f - MIN_TURN_RATIO));
+    } else {
+      rightMotor = throttle;
+      leftMotor = throttle * (1.0f + steer * (1.0f - MIN_TURN_RATIO));
     }
   }
 
-  if (!anyControllerActive && !hasConnectedController()) {
-    berhenti();
+  setMotor(constrain(leftMotor, -speedLimit, speedLimit),
+           constrain(rightMotor, -speedLimit, speedLimit));
+
+  if (millis() - lastDebug >= 100) {
+    lastDebug = millis();
+    Serial.printf("[IBUS] CH1=%u CH2=%u CH5=%u | L=%d R=%d Turbo=%s\n",
+                  channels[0], channels[1], channels[4],
+                  leftMotor, rightMotor, turboMode ? "ON" : "OFF");
   }
 }
 
 // ================= SETUP =================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n===== ESP32 RC ROBOT (BLUEPAD32) =====");
+  Serial.println("\n===== ESP32 SUMOBOT (FS-iA6B i-BUS) =====");
 
-  // Setup I/O Pin
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  pinMode(STBY, OUTPUT);
-  digitalWrite(STBY, HIGH);
 
+  ledcSetup(PWM_KIRI_MAJU, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_KIRI_MUNDUR, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_KANAN_MAJU, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_KANAN_MUNDUR, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(MOTOR_KIRI_IN1, PWM_KIRI_MAJU);
+  ledcAttachPin(MOTOR_KIRI_IN2, PWM_KIRI_MUNDUR);
+  ledcAttachPin(MOTOR_KANAN_IN3, PWM_KANAN_MAJU);
+  ledcAttachPin(MOTOR_KANAN_IN4, PWM_KANAN_MUNDUR);
+
+  IBusSerial.begin(115200, SERIAL_8N1, IBUS_RX_PIN, -1);
   berhenti();
-
-  // Setup Bluepad32
-  String fv = BP32.firmwareVersion();
-  Serial.printf("[INIT] Bluepad32 Firmware: %s\n", fv.c_str());
-  const uint8_t* addr = BP32.localBdAddress();
-  Serial.printf("[INIT] BD Addr: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
-
-  // Daftarkan fungsi callback
-  BP32.setup(&onConnectedController, &onDisconnectedController);
-  BP32.enableVirtualDevice(false);
-  
-  // Lupakan device lama (opsional, bawaan Bluepad32 untuk reset pairing)
-  BP32.forgetBluetoothKeys(); 
-
-  Serial.println("[INIT] Waiting for controller... (Press SHARE + PS until blinking fast)");
+  Serial.println("[INIT] Menunggu data i-BUS pada GPIO16...");
 }
 
 // ================= LOOP =================
 void loop() {
-  // WAJIB dipanggil di awal loop agar Bluepad32 memproses data Bluetooth
-  bool hasLatestData = BP32.update();
+  if (readIBus()) processReceiver();
 
-  if (hasLatestData) {
-    processControllers();
-  }
-
-  if (hasConnectedController() && millis() - lastControllerData > CONTROLLER_TIMEOUT_MS) {
+  if (receiverConnected && millis() - lastReceiverFrame > RECEIVER_TIMEOUT_MS) {
+    receiverConnected = false;
     berhenti();
+    Serial.println("[FAILSAFE] Sinyal receiver hilang");
   }
 
-  // Heartbeat LED (Hanya berkedip lambat jika controller belum connect)
-  if (millis() - lastBlink > 500) {
+  if (millis() - lastBlink >= 500) {
     lastBlink = millis();
-    
-    // Jika tidak ada controller terkoneksi, buat led berkedip
-    bool connected = hasConnectedController();
-    
-    if(!connected) {
-      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    } else {
-      digitalWrite(LED_PIN, HIGH); // Diam/Menyala penuh saat connect
-    }
+    digitalWrite(LED_PIN, receiverConnected ? HIGH : !digitalRead(LED_PIN));
   }
 
   delay(1);
