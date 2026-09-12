@@ -230,6 +230,19 @@ constexpr unsigned long MS_PER_DEGREE = 5;
 Robot saat ini belum menggunakan encoder, sehingga nilai tersebut perlu
 disesuaikan berdasarkan hasil pengujian robot.
 
+Spesifikasi motor untuk estimasi RPM dan torsi juga diisi di file yang sama:
+
+```cpp
+constexpr float MOTOR_NOMINAL_VOLTAGE = 6.0f;
+constexpr float MOTOR_NOMINAL_RPM = 300.0f;
+constexpr float MOTOR_STALL_TORQUE_NM = 0.10f;
+constexpr float MOTOR_SUPPLY_VOLTAGE = 6.0f;
+```
+
+Estimasi dihitung dari duty PWM dan rasio tegangan, lalu ditampilkan di Serial
+Monitor. Nilai ini bukan pengukuran aktual; encoder diperlukan untuk RPM nyata,
+dan sensor arus diperlukan untuk torsi aktual.
+
 ### Menambah Mode Gerak
 
 Tambahkan state dan transisinya di `SumobotCheatsheet`, atau buat modul mode
