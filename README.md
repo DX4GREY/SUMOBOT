@@ -205,6 +205,8 @@ SUMOBOT/
 │   ├── sumobot_app.h
 │   ├── sumobot_motor.h
 │   └── sumobot_cheatsheet.h
+├── diagram.json              # Rangkaian simulasi Wokwi
+├── wokwi.toml                # Firmware dan ELF untuk Wokwi
 ├── lib/                      # External libraries
 ├── test/                     # Test files
 ├── platformio.ini           # PlatformIO configuration
@@ -229,6 +231,14 @@ constexpr unsigned long MS_PER_DEGREE = 5;
 
 Robot saat ini belum menggunakan encoder, sehingga nilai tersebut perlu
 disesuaikan berdasarkan hasil pengujian robot.
+
+### Wokwi
+
+Jalankan simulasi dari VS Code dengan ekstensi Wokwi setelah menjalankan build
+PlatformIO. `diagram.json` memakai custom chip TB6612FNG dan dua motor DC
+dengan mapping pin yang sama seperti rangkaian fisik. Bluepad32 tidak memiliki
+controller Bluetooth virtual di Wokwi, sehingga input gamepad perlu diuji pada
+hardware ESP32.
 
 Spesifikasi motor untuk estimasi RPM dan torsi juga diisi di file yang sama:
 
