@@ -196,13 +196,46 @@ BIN1: 18, BIN2: 19, PWMB: 21
 ```
 SUMOBOT/
 ├── src/
-│   └── main.cpp              # Main program with motor control and web server
-├── include/                  # Header files (if needed)
+│   ├── main.cpp              # Entry point PlatformIO
+│   ├── sumobot_app.cpp       # Lifecycle, Bluepad32, and manual control
+│   ├── sumobot_motor.cpp     # Motor abstraction
+│   └── sumobot_cheatsheet.cpp# Automatic movement state machine
+├── include/
+│   ├── sumobot_config.h      # Pins, speed, timeout, and calibration
+│   ├── sumobot_app.h
+│   ├── sumobot_motor.h
+│   └── sumobot_cheatsheet.h
 ├── lib/                      # External libraries
 ├── test/                     # Test files
 ├── platformio.ini           # PlatformIO configuration
 └── README.md                # This file
 ```
+
+## Sumobot Framework
+
+`main.cpp` hanya menjalankan `begin()` dan `update()` dari `SumobotApp`. Fitur
+robot dipisahkan ke modul agar pengembangan berikutnya tidak menumpuk di satu
+file.
+
+### Konfigurasi
+
+Ubah pin, kecepatan, timeout controller, atau kalibrasi gerakan berbasis waktu
+di `include/sumobot_config.h`:
+
+```cpp
+constexpr unsigned long MS_PER_CM = 60;
+constexpr unsigned long MS_PER_DEGREE = 5;
+```
+
+Robot saat ini belum menggunakan encoder, sehingga nilai tersebut perlu
+disesuaikan berdasarkan hasil pengujian robot.
+
+### Menambah Mode Gerak
+
+Tambahkan state dan transisinya di `SumobotCheatsheet`, atau buat modul mode
+baru dengan pola yang sama: simpan state, jalankan aksi di `start()`, dan
+perbarui secara non-blocking di `update()`. Hindari `delay()` panjang agar
+tombol berhenti dan koneksi controller tetap responsif.
 
 ## Dependencies
 
