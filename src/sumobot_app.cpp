@@ -99,8 +99,10 @@ bool SumobotApp::hasConnectedController() const {
 
 bool SumobotApp::processCheatsheetButtons(uint16_t buttons) {
   const bool stopPressed = buttons & BUTTON_A;
-  const bool comboPressed = (buttons & BUTTON_Y) && (buttons & BUTTON_B) &&
-                            (buttons & BUTTON_X);
+
+  // combo is Right Triger + Left Trigger
+  // BUTTON_R1 and BUTTON_L1 are the right and left triggers
+  const bool comboPressed = (buttons & BUTTON_TRIGGER_L) && (buttons & BUTTON_TRIGGER_R);
 
   if (stopPressed) {
     cheatComboWasDown_ = false;
