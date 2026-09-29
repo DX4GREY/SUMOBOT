@@ -10,7 +10,7 @@
 
 namespace SumobotConfig {
 
-// TB6612FNG pin mapping.
+// ================= TB6612FNG PIN MAPPING =================
 constexpr int LEFT_IN1 = 4;
 constexpr int LEFT_IN2 = 14;
 constexpr int LEFT_PWM = 5;
@@ -20,20 +20,54 @@ constexpr int RIGHT_PWM = 21;
 constexpr int STANDBY = 33;
 constexpr int STATUS_LED = 2;
 
-constexpr int DEADZONE = 20;
-constexpr int CONTROLLER_AXIS_LIMIT = 512;
-constexpr int MOTOR_TARGET_DEADBAND = 3;
-constexpr int MAX_SPEED = 255;
-constexpr int NORMAL_SPEED = 180;
-constexpr unsigned long CONTROLLER_TIMEOUT_MS = 250;
-constexpr bool USE_ACELERATE = true;
-// Initial PWM when acceleration starts from a complete stop. The value is
-// limited to the requested target in code, so it is safe for small commands.
-// Set to 0 for a fully gradual start.
-constexpr int START_MOTOR_ACELERATE = 10;
+// ================= MOTOR POLARITY =================
+// Set to 1 for standard direction, -1 to invert if a motor is mounted backwards.
+constexpr int LEFT_MOTOR_DIR = 1;
+constexpr int RIGHT_MOTOR_DIR = 1;
 
-// Motor specification. Replace these example values with the motor datasheet.
-// RPM and torque must describe the gearbox output shaft if a gearbox is used.
+// Default inversion states on startup (can be toggled on-the-fly via L3 and R3)
+constexpr bool INVERT_THROTTLE_DEFAULT = false;
+constexpr bool INVERT_STEERING_DEFAULT = false;
+
+// ================= CONTROLLER THRESHOLDS =================
+constexpr int DEADZONE = 15;
+constexpr int CONTROLLER_AXIS_LIMIT = 512;
+// Exponential response curve (0.0 = linear, 0.20 = soft center for fine aim)
+constexpr float STICK_EXPO = 0.20f;
+
+// ================= SPEED PROFILES (PWM 0-255) =================
+constexpr int SPEED_LOW = 130;       // Mode 1: Rendah (Precision / Low Grip)
+constexpr int SPEED_NORMAL = 180;    // Mode 2: Normal (Combat standard)
+constexpr int SPEED_FAST = 220;      // Mode 3: Cepat (Fast search & flank)
+constexpr int MAX_SPEED = 255;       // Mode Serang / Turbo (R1 held) / Blitz
+
+// Legacy alias
+constexpr int NORMAL_SPEED = SPEED_NORMAL;
+
+// ================= SAFETY & TIMEOUTS =================
+// Maximum time without controller data packet before emergency auto-stop (ms)
+constexpr unsigned long CONTROLLER_TIMEOUT_MS = 500;
+
+// Set to true to erase paired Bluetooth keys on every reboot.
+// Default false allows paired gamepads (PS4/PS5/Xbox/Switch) to reconnect instantly on power-on!
+constexpr bool FORGET_KEYS_ON_BOOT = false;
+
+// ================= ACCELERATION & ANTI-WHEELIE =================
+// Default state for acceleration ramping.
+// Smooths sudden acceleration so the front scoop stays flat on the ring.
+// Can be toggled on-the-fly via Gamepad (Triangle / Y button).
+constexpr bool USE_ACCELERATE_DEFAULT = true;
+
+// Initial PWM jump when starting from stop to break gearbox static friction
+constexpr int START_MOTOR_ACCELERATE = 35;
+
+// Acceleration ramp duration in milliseconds (anti-wheelie)
+constexpr unsigned long MOTOR_ACCELERATION_MS = 140;
+
+// Deceleration ramp duration in milliseconds (controlled quick stop)
+constexpr unsigned long MOTOR_DECELERATION_MS = 80;
+
+// ================= 500G SUMOBOT SPECIFICATIONS =================
 constexpr float ROBOT_MASS_KG = 0.474f;
 constexpr float WHEEL_DIAMETER_M = 0.042f;
 constexpr float SHAFT_TO_FRONT_M = 0.075f;
@@ -42,21 +76,12 @@ constexpr float MOTOR_NOMINAL_RPM = 600.0f;
 constexpr float MOTOR_STALL_TORQUE_NM = 4.10f;
 constexpr float MOTOR_SUPPLY_VOLTAGE = 12.0f;
 
-// Target chassis acceleration. MOTOR_ACCELERATION_MS is derived from the
-// wheel circumference and nominal motor speed, so changing wheel diameter or
-// motor RPM automatically retunes the ramp. The mass and shaft offset above
-// document the current chassis; tipping also depends on the actual center of
-// mass and tire grip, which are not known from the current measurements.
-constexpr float TARGET_LINEAR_ACCELERATION_MPS2 = 5.0f;
-constexpr float WHEEL_PI = 3.14159265359f;
-constexpr float MAX_LINEAR_SPEED_MPS =
-    (MOTOR_NOMINAL_RPM / 60.0f) * WHEEL_PI * WHEEL_DIAMETER_M;
-constexpr unsigned long MOTOR_ACCELERATION_MS = static_cast<unsigned long>(
-    (MAX_LINEAR_SPEED_MPS / TARGET_LINEAR_ACCELERATION_MPS2) * 1000.0f + 0.5f);
-
-// Time-based movement calibration. Use encoders later for exact distances/angles.
+// ================= AUTONOMOUS TACTICS CALIBRATION =================
+// Time-based movement calibration (tune based on floor traction & battery voltage)
 constexpr unsigned long MS_PER_CM = 60;
 constexpr unsigned long MS_PER_DEGREE = 5;
-constexpr int CHEATSHEET_SPEED = NORMAL_SPEED;
+constexpr int CHEATSHEET_SPEED = SPEED_NORMAL;
+// Maximum duration of the final attack charge before automatic return to idle (ms)
+constexpr unsigned long TACTIC_FINAL_CHARGE_MS = 1500;
 
-}
+}  // namespace SumobotConfig

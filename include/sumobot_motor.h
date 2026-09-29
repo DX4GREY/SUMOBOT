@@ -17,24 +17,29 @@ class SumobotMotor {
   SumobotMotor();
 
   void begin();
-  void drive(int left, int right);
+  void drive(int left, int right, bool bypassRamp = false);
   void update();
   void stop();
+  void brake();
   bool isStopped() const;
   const SumobotMotorTelemetry& telemetry() const;
 
+  void setAccelerationEnabled(bool enabled);
+  bool isAccelerationEnabled() const;
+
  private:
-  static bool shouldAccelerate(int left, int right);
   void applyOutputs(int left, int right);
   void refreshRamp();
 
+  static int calculateStep(int current, int target, unsigned long elapsed);
   static float estimateRpm(int command);
   static float estimateTorqueNm(int command);
 
   Motor leftMotor_;
   Motor rightMotor_;
-  bool stopped_ = false;
+  bool stopped_ = true;
   bool rampActive_ = false;
+  bool accelerationEnabled_ = true;
   int appliedLeft_ = 0;
   int appliedRight_ = 0;
   int rampTargetLeft_ = 0;

@@ -16,58 +16,71 @@ int moveToward(int current, int target, int step) {
 
 int initialRampOutput(int target) {
   const int initialMagnitude = min(
-      abs(target), max(0, SumobotConfig::START_MOTOR_ACELERATE));
+      abs(target), max(0, SumobotConfig::START_MOTOR_ACCELERATE));
   return target < 0 ? -initialMagnitude : initialMagnitude;
 }
 
-}
+}  // namespace
 
 SumobotMotor::SumobotMotor()
     : leftMotor_(SumobotConfig::LEFT_IN1, SumobotConfig::LEFT_IN2,
-                 SumobotConfig::LEFT_PWM, 1, SumobotConfig::STANDBY),
+                 SumobotConfig::LEFT_PWM, SumobotConfig::LEFT_MOTOR_DIR,
+                 SumobotConfig::STANDBY),
       rightMotor_(SumobotConfig::RIGHT_IN1, SumobotConfig::RIGHT_IN2,
-                  SumobotConfig::RIGHT_PWM, 1, SumobotConfig::STANDBY) {}
+                  SumobotConfig::RIGHT_PWM, SumobotConfig::RIGHT_MOTOR_DIR,
+                  SumobotConfig::STANDBY),
+      accelerationEnabled_(SumobotConfig::USE_ACCELERATE_DEFAULT) {}
 
 void SumobotMotor::begin() {
   pinMode(SumobotConfig::STANDBY, OUTPUT);
   digitalWrite(SumobotConfig::STANDBY, HIGH);
-  stop();
+  brake();
 }
 
-void SumobotMotor::drive(int left, int right) {
+void SumobotMotor::drive(int left, int right, bool bypassRamp) {
   left = constrain(left, -SumobotConfig::MAX_SPEED, SumobotConfig::MAX_SPEED);
   right = constrain(right, -SumobotConfig::MAX_SPEED, SumobotConfig::MAX_SPEED);
 
-  if (left == 0 && right == 0) {
-    stop();
-    return;
-  }
-
-  if (SumobotConfig::USE_ACELERATE && shouldAccelerate(left, right)) {
-    if (!rampActive_) {
-      const bool startingFromStop = appliedLeft_ == 0 && appliedRight_ == 0;
-      if (startingFromStop && SumobotConfig::START_MOTOR_ACELERATE > 0) {
-        applyOutputs(initialRampOutput(left), initialRampOutput(right));
-      }
-      rampLastUpdatedAt_ = millis();
-      rampActive_ = true;
-    }
-    // Update the target without restarting progress. Ignore tiny command
-    // changes to prevent stick noise from making the chassis twitch.
-    if (abs(left - rampTargetLeft_) >= SumobotConfig::MOTOR_TARGET_DEADBAND) {
-      rampTargetLeft_ = left;
-    }
-    if (abs(right - rampTargetRight_) >=
-        SumobotConfig::MOTOR_TARGET_DEADBAND) {
-      rampTargetRight_ = right;
-    }
-    refreshRamp();
-  } else {
+  if (!accelerationEnabled_ || bypassRamp) {
     rampActive_ = false;
     rampTargetLeft_ = left;
     rampTargetRight_ = right;
-    applyOutputs(left, right);
+    if (left == 0 && right == 0) {
+      brake();
+    } else {
+      applyOutputs(left, right);
+    }
+    return;
   }
+
+  // Already stopped and requested target is stop
+  if (left == 0 && right == 0 && appliedLeft_ == 0 && appliedRight_ == 0) {
+    brake();
+    return;
+  }
+
+  const bool startingFromStop = (appliedLeft_ == 0 && appliedRight_ == 0);
+
+  rampTargetLeft_ = left;
+  rampTargetRight_ = right;
+
+  if (startingFromStop && (left != 0 || right != 0)) {
+    // Jump straight past the static gearbox friction deadband into immediate motion
+    const int initLeft = (left != 0 && SumobotConfig::START_MOTOR_ACCELERATE > 0)
+                             ? initialRampOutput(left)
+                             : 0;
+    const int initRight = (right != 0 && SumobotConfig::START_MOTOR_ACCELERATE > 0)
+                              ? initialRampOutput(right)
+                              : 0;
+    applyOutputs(initLeft, initRight);
+    rampLastUpdatedAt_ = millis();
+    rampActive_ = true;
+  } else if (!rampActive_) {
+    rampLastUpdatedAt_ = millis();
+    rampActive_ = true;
+  }
+
+  refreshRamp();
 }
 
 void SumobotMotor::update() {
@@ -75,14 +88,25 @@ void SumobotMotor::update() {
 }
 
 void SumobotMotor::applyOutputs(int left, int right) {
-  if (left == appliedLeft_ && right == appliedRight_) return;
+  if (left == appliedLeft_ && right == appliedRight_ && !stopped_) return;
 
   appliedLeft_ = left;
   appliedRight_ = right;
 
-  leftMotor_.drive(left);
-  rightMotor_.drive(right);
-  stopped_ = left == 0 && right == 0;
+  // Active electrical dynamic braking when output is 0, drive when non-zero
+  if (left == 0) {
+    leftMotor_.brake();
+  } else {
+    leftMotor_.drive(left);
+  }
+
+  if (right == 0) {
+    rightMotor_.brake();
+  } else {
+    rightMotor_.drive(right);
+  }
+
+  stopped_ = (left == 0 && right == 0);
 
   telemetry_.leftCommand = left;
   telemetry_.rightCommand = right;
@@ -98,57 +122,67 @@ void SumobotMotor::applyOutputs(int left, int right) {
 #endif
 }
 
+int SumobotMotor::calculateStep(int current, int target, unsigned long elapsed) {
+  if (elapsed == 0) return 0;
+
+  // Decelerating if target magnitude is less than current magnitude,
+  // or if target has opposite sign (must decelerate towards 0 first).
+  const bool isDecelerating = (abs(target) < abs(current)) ||
+                              ((current > 0 && target < 0) || (current < 0 && target > 0));
+
+  const unsigned long rampMs = isDecelerating
+                                   ? SumobotConfig::MOTOR_DECELERATION_MS
+                                   : SumobotConfig::MOTOR_ACCELERATION_MS;
+
+  if (rampMs == 0) return SumobotConfig::MAX_SPEED;
+
+  return max(1, static_cast<int>(
+                    (static_cast<unsigned long>(SumobotConfig::MAX_SPEED) * elapsed) /
+                    rampMs));
+}
+
 void SumobotMotor::refreshRamp() {
   if (!rampActive_) return;
 
   const unsigned long now = millis();
   const unsigned long elapsed = now - rampLastUpdatedAt_;
   if (elapsed == 0) return;
-
-  const int step = SumobotConfig::MOTOR_ACCELERATION_MS == 0
-                       ? SumobotConfig::MAX_SPEED
-                       : max(1, static_cast<int>(
-                                    (static_cast<unsigned long>(
-                                         SumobotConfig::MAX_SPEED) * elapsed) /
-                                    SumobotConfig::MOTOR_ACCELERATION_MS));
   rampLastUpdatedAt_ = now;
 
-  const int nextLeft = moveToward(appliedLeft_, rampTargetLeft_, step);
-  const int nextRight = moveToward(appliedRight_, rampTargetRight_, step);
+  const int stepLeft = calculateStep(appliedLeft_, rampTargetLeft_, elapsed);
+  const int stepRight = calculateStep(appliedRight_, rampTargetRight_, elapsed);
+
+  const int nextLeft = moveToward(appliedLeft_, rampTargetLeft_, stepLeft);
+  const int nextRight = moveToward(appliedRight_, rampTargetRight_, stepRight);
 
   applyOutputs(nextLeft, nextRight);
 
   if (nextLeft == rampTargetLeft_ && nextRight == rampTargetRight_) {
     rampActive_ = false;
+    if (nextLeft == 0 && nextRight == 0) {
+      brake();
+    }
   }
-}
-
-bool SumobotMotor::shouldAccelerate(int left, int right) {
-  if (left == 0 && right == 0) return false;
-  if (left == 0 || right == 0) return true;
-  return (left > 0 && right > 0) || (left < 0 && right < 0);
 }
 
 void SumobotMotor::stop() {
-  const bool alreadyStopped = stopped_ && !rampActive_ && appliedLeft_ == 0 &&
-                              appliedRight_ == 0;
+  brake();
+}
 
+void SumobotMotor::brake() {
   rampActive_ = false;
   rampTargetLeft_ = 0;
   rampTargetRight_ = 0;
-  if (!alreadyStopped) {
-    leftMotor_.drive(0);
-    rightMotor_.drive(0);
-  }
+  leftMotor_.brake();
+  rightMotor_.brake();
   appliedLeft_ = 0;
   appliedRight_ = 0;
   stopped_ = true;
   telemetry_ = {};
-  if (!alreadyStopped) {
+
 #if SUMOBOT_DEBUG_LOGGING
-    Serial.println("[MOTOR] STOP");
+  Serial.println("[MOTOR] ACTIVE BRAKE");
 #endif
-  }
 }
 
 bool SumobotMotor::isStopped() const {
@@ -157,6 +191,17 @@ bool SumobotMotor::isStopped() const {
 
 const SumobotMotorTelemetry& SumobotMotor::telemetry() const {
   return telemetry_;
+}
+
+void SumobotMotor::setAccelerationEnabled(bool enabled) {
+  accelerationEnabled_ = enabled;
+  if (!accelerationEnabled_) {
+    rampActive_ = false;
+  }
+}
+
+bool SumobotMotor::isAccelerationEnabled() const {
+  return accelerationEnabled_;
 }
 
 float SumobotMotor::estimateRpm(int command) {
