@@ -37,10 +37,8 @@ class SumobotMotor {
   bool rampActive_ = false;
   int appliedLeft_ = 0;
   int appliedRight_ = 0;
-  int rampStartLeft_ = 0;
-  int rampStartRight_ = 0;
   int rampTargetLeft_ = 0;
   int rampTargetRight_ = 0;
-  unsigned long rampStartedAt_ = 0;
+  unsigned long rampLastUpdatedAt_ = 0;
   SumobotMotorTelemetry telemetry_;
 };

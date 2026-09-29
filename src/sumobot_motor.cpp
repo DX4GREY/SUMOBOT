@@ -8,8 +8,16 @@ float pwmRatio(int command) {
   return static_cast<float>(abs(command)) / SumobotConfig::MAX_SPEED;
 }
 
-float lerp(float from, float to, float progress) {
-  return from + (to - from) * progress;
+int moveToward(int current, int target, int step) {
+  if (current < target) return min(current + step, target);
+  if (current > target) return max(current - step, target);
+  return current;
+}
+
+int initialRampOutput(int target) {
+  const int initialMagnitude = min(
+      abs(target), max(0, SumobotConfig::START_MOTOR_ACELERATE));
+  return target < 0 ? -initialMagnitude : initialMagnitude;
 }
 
 }
@@ -30,21 +38,28 @@ void SumobotMotor::drive(int left, int right) {
   left = constrain(left, -SumobotConfig::MAX_SPEED, SumobotConfig::MAX_SPEED);
   right = constrain(right, -SumobotConfig::MAX_SPEED, SumobotConfig::MAX_SPEED);
 
-  update();
-
   if (left == 0 && right == 0) {
     stop();
     return;
   }
 
   if (SumobotConfig::USE_ACELERATE && shouldAccelerate(left, right)) {
-    if (!rampActive_ || rampTargetLeft_ != left || rampTargetRight_ != right) {
-      rampStartLeft_ = appliedLeft_;
-      rampStartRight_ = appliedRight_;
-      rampTargetLeft_ = left;
-      rampTargetRight_ = right;
-      rampStartedAt_ = millis();
+    if (!rampActive_) {
+      const bool startingFromStop = appliedLeft_ == 0 && appliedRight_ == 0;
+      if (startingFromStop && SumobotConfig::START_MOTOR_ACELERATE > 0) {
+        applyOutputs(initialRampOutput(left), initialRampOutput(right));
+      }
+      rampLastUpdatedAt_ = millis();
       rampActive_ = true;
+    }
+    // Update the target without restarting progress. Ignore tiny command
+    // changes to prevent stick noise from making the chassis twitch.
+    if (abs(left - rampTargetLeft_) >= SumobotConfig::MOTOR_TARGET_DEADBAND) {
+      rampTargetLeft_ = left;
+    }
+    if (abs(right - rampTargetRight_) >=
+        SumobotConfig::MOTOR_TARGET_DEADBAND) {
+      rampTargetRight_ = right;
     }
     refreshRamp();
   } else {
@@ -60,6 +75,8 @@ void SumobotMotor::update() {
 }
 
 void SumobotMotor::applyOutputs(int left, int right) {
+  if (left == appliedLeft_ && right == appliedRight_) return;
+
   appliedLeft_ = left;
   appliedRight_ = right;
 
@@ -74,29 +91,34 @@ void SumobotMotor::applyOutputs(int left, int right) {
   telemetry_.leftTorqueNm = estimateTorqueNm(left);
   telemetry_.rightTorqueNm = estimateTorqueNm(right);
 
+#if SUMOBOT_DEBUG_LOGGING
   Serial.printf("[MOTOR] LEFT=%d RIGHT=%d | RPM L=%.1f R=%.1f | TORQUE L=%.3f R=%.3f Nm\n",
                 left, right, telemetry_.leftRpm, telemetry_.rightRpm,
                 telemetry_.leftTorqueNm, telemetry_.rightTorqueNm);
+#endif
 }
 
 void SumobotMotor::refreshRamp() {
   if (!rampActive_) return;
 
-  const unsigned long elapsed = millis() - rampStartedAt_;
-  const float progress = constrain(
-      static_cast<float>(elapsed) / SumobotConfig::MOTOR_ACCELERATION_MS, 0.0f,
-      1.0f);
+  const unsigned long now = millis();
+  const unsigned long elapsed = now - rampLastUpdatedAt_;
+  if (elapsed == 0) return;
 
-  const int nextLeft = static_cast<int>(round(
-      lerp(static_cast<float>(rampStartLeft_),
-           static_cast<float>(rampTargetLeft_), progress)));
-  const int nextRight = static_cast<int>(round(
-      lerp(static_cast<float>(rampStartRight_),
-           static_cast<float>(rampTargetRight_), progress)));
+  const int step = SumobotConfig::MOTOR_ACCELERATION_MS == 0
+                       ? SumobotConfig::MAX_SPEED
+                       : max(1, static_cast<int>(
+                                    (static_cast<unsigned long>(
+                                         SumobotConfig::MAX_SPEED) * elapsed) /
+                                    SumobotConfig::MOTOR_ACCELERATION_MS));
+  rampLastUpdatedAt_ = now;
+
+  const int nextLeft = moveToward(appliedLeft_, rampTargetLeft_, step);
+  const int nextRight = moveToward(appliedRight_, rampTargetRight_, step);
 
   applyOutputs(nextLeft, nextRight);
 
-  if (progress >= 1.0f) {
+  if (nextLeft == rampTargetLeft_ && nextRight == rampTargetRight_) {
     rampActive_ = false;
   }
 }
@@ -108,20 +130,25 @@ bool SumobotMotor::shouldAccelerate(int left, int right) {
 }
 
 void SumobotMotor::stop() {
-  if (stopped_) return;
+  const bool alreadyStopped = stopped_ && !rampActive_ && appliedLeft_ == 0 &&
+                              appliedRight_ == 0;
 
   rampActive_ = false;
-  rampStartLeft_ = 0;
-  rampStartRight_ = 0;
   rampTargetLeft_ = 0;
   rampTargetRight_ = 0;
-  leftMotor_.drive(0);
-  rightMotor_.drive(0);
+  if (!alreadyStopped) {
+    leftMotor_.drive(0);
+    rightMotor_.drive(0);
+  }
   appliedLeft_ = 0;
   appliedRight_ = 0;
   stopped_ = true;
   telemetry_ = {};
-  Serial.println("[MOTOR] STOP");
+  if (!alreadyStopped) {
+#if SUMOBOT_DEBUG_LOGGING
+    Serial.println("[MOTOR] STOP");
+#endif
+  }
 }
 
 bool SumobotMotor::isStopped() const {

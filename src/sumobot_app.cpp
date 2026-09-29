@@ -2,6 +2,23 @@
 
 #include "sumobot_config.h"
 
+namespace {
+
+int normalizeAxis(int value) {
+  value = constrain(value, -SumobotConfig::CONTROLLER_AXIS_LIMIT,
+                    SumobotConfig::CONTROLLER_AXIS_LIMIT);
+  const int magnitude = abs(value);
+  if (magnitude <= SumobotConfig::DEADZONE) return 0;
+
+  const int normalizedMagnitude = map(
+      magnitude, SumobotConfig::DEADZONE,
+      SumobotConfig::CONTROLLER_AXIS_LIMIT, 0,
+      SumobotConfig::CONTROLLER_AXIS_LIMIT);
+  return value < 0 ? -normalizedMagnitude : normalizedMagnitude;
+}
+
+}
+
 SumobotApp* SumobotApp::instance_ = nullptr;
 
 SumobotApp::SumobotApp() : cheatsheet_(motor_) {}
@@ -126,16 +143,15 @@ void SumobotApp::processGamepad(ControllerPtr controller) {
   turboMode_ = buttons & BUTTON_SHOULDER_R;
   const int speedLimit = turboMode_ ? SumobotConfig::MAX_SPEED
                                     : SumobotConfig::NORMAL_SPEED;
-  const int deadAnalog = 40;
-  const int axisY = controller->axisY();
-  const int axisX = controller->axisRX();
-  const int ly = axisY == 0 ? 0 : axisY > deadAnalog ? 512 :
-                 axisY < -deadAnalog ? -512 : 0;
-  const int lx = axisX == 0 ? 0 : axisX > deadAnalog ? 512 :
-                 axisX < -deadAnalog ? -512 : 0;
+  const int ly = normalizeAxis(controller->axisY());
+  const int lx = normalizeAxis(controller->axisRX());
 
-  const int throttle = map(-ly, -512, 512, -speedLimit, speedLimit);
-  const int steering = map(-lx, -512, 512, -speedLimit, speedLimit);
+  const int throttle = map(-ly, -SumobotConfig::CONTROLLER_AXIS_LIMIT,
+                           SumobotConfig::CONTROLLER_AXIS_LIMIT, -speedLimit,
+                           speedLimit);
+  const int steering = map(-lx, -SumobotConfig::CONTROLLER_AXIS_LIMIT,
+                           SumobotConfig::CONTROLLER_AXIS_LIMIT, -speedLimit,
+                           speedLimit);
   int leftMotor;
   int rightMotor;
 
@@ -160,8 +176,10 @@ void SumobotApp::processGamepad(ControllerPtr controller) {
   if (abs(rightMotor) < 10) rightMotor = 0;
 
   motor_.drive(leftMotor, rightMotor);
+#if SUMOBOT_DEBUG_LOGGING
   Serial.printf("[BP32] LX=%d LY=%d | Turbo=%s\n", lx, ly,
                 turboMode_ ? "ON" : "OFF");
+#endif
 }
 
 void SumobotApp::processControllers() {
