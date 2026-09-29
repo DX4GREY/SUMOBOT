@@ -18,13 +18,15 @@ constexpr int DEADZONE = 15;
 constexpr int MAX_SPEED = 255;
 constexpr int NORMAL_SPEED = 180;
 constexpr unsigned long CONTROLLER_TIMEOUT_MS = 250;
+constexpr bool USE_ACELERATE = true;
+constexpr unsigned long MOTOR_ACCELERATION_MS = 100;
 
 // Motor specification. Replace these example values with the motor datasheet.
 // RPM and torque must describe the gearbox output shaft if a gearbox is used.
-constexpr float MOTOR_NOMINAL_VOLTAGE = 6.0f;
+constexpr float MOTOR_NOMINAL_VOLTAGE = 12.0f;
 constexpr float MOTOR_NOMINAL_RPM = 600.0f;
 constexpr float MOTOR_STALL_TORQUE_NM = 4.10f;
-constexpr float MOTOR_SUPPLY_VOLTAGE = 6.0f;
+constexpr float MOTOR_SUPPLY_VOLTAGE = 12.0f;
 
 // Time-based movement calibration. Use encoders later for exact distances/angles.
 constexpr unsigned long MS_PER_CM = 60;

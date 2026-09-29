@@ -32,6 +32,8 @@ void SumobotApp::begin() {
 void SumobotApp::update() {
   if (BP32.update()) processControllers();
 
+  motor_.update();
+
   if (hasConnectedController() &&
       millis() - lastControllerData_ > SumobotConfig::CONTROLLER_TIMEOUT_MS &&
       !cheatsheet_.isActive()) {

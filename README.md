@@ -227,10 +227,16 @@ di `include/sumobot_config.h`:
 ```cpp
 constexpr unsigned long MS_PER_CM = 60;
 constexpr unsigned long MS_PER_DEGREE = 5;
+constexpr bool USE_ACELERATE = true;
+constexpr unsigned long MOTOR_ACCELERATION_MS = 500;
 ```
 
 Robot saat ini belum menggunakan encoder, sehingga nilai tersebut perlu
 disesuaikan berdasarkan hasil pengujian robot.
+
+`USE_ACELERATE` mengaktifkan ramp kecepatan untuk gerakan maju dan mundur.
+`MOTOR_ACCELERATION_MS` menentukan durasi akselerasi penuh dalam milidetik,
+dan saat ini diset ke 500 ms.
 
 ### Wokwi
 
